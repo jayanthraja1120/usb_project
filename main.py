@@ -4,6 +4,22 @@ import shutil
 import socket
 import pandas as pd
 import time
+import logging
+
+# ======== LOGGING SETUP ========
+LOG_FILE = "/home/pi/usb_project/log.txt"
+
+logging.basicConfig(
+    filename=LOG_FILE,
+    filemode='a',                     # append logs
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    level=logging.INFO
+)
+
+def log(msg):
+    print(msg)
+    logging.info(msg)
 
 # ======== CONFIGURATION ========
 USB_PATH = "/media/pi/USB DEVICE"
@@ -22,10 +38,10 @@ END_TAG = b'\x03'
 def check_usb():
     """Check if USB pendrive is inserted and mounted."""
     if os.path.ismount(USB_PATH):
-        print(f"[USB] Pendrive detected at: {USB_PATH}")
+        log(f"[USB] Pendrive detected at: {USB_PATH}")
         return True
     else:
-        print("[USB] No pendrive detected.")
+        log("[USB] No pendrive detected.")
         return False
 
 
@@ -37,9 +53,9 @@ def copy_usb_to_local():
             if file.lower().endswith(".csv"):
                 src = os.path.join(root, file)
                 shutil.copy(src, DEST_PATH)
-                print(f"[COPY] Copied {file} → {DEST_PATH}")
+                log(f"[COPY] Copied {file} → {DEST_PATH}")
                 return True
-    print("[COPY] No CSV file found in USB.")
+    log("[COPY] No CSV file found in USB.")
     return False
 
 
@@ -50,25 +66,25 @@ def send_tcp():
        No retransmissions allowed."""
 
     if not os.path.exists(DEST_PATH):
-        print(f"[TCP] No CSV found at {DEST_PATH}")
+        log(f"[TCP] No CSV found at {DEST_PATH}")
         return False
 
     # ---- READ CSV ----
     try:
         df = pd.read_csv(DEST_PATH, header=None)
         lines = df[0].dropna().astype(str).tolist()
-        print(f"[TCP] Loaded {len(lines)} lines.")
+        log(f"[TCP] Loaded {len(lines)} lines.")
     except Exception as e:
-        print(f"[TCP] CSV Read Error: {e}")
+        log(f"[TCP] CSV Read Error: {e}")
         return False
 
     # ---- CONNECT ----
     try:
         sock = socket.create_connection((SERVER_HOST, SERVER_PORT), timeout=5)
         sock.settimeout(3)
-        print(f"[TCP] Connected to {SERVER_HOST}:{SERVER_PORT}")
+        log(f"[TCP] Connected to {SERVER_HOST}:{SERVER_PORT}")
     except Exception as e:
-        print(f"[TCP] Connect Error: {e}")
+        log(f"[TCP] Connect Error: {e}")
         return False
 
     # ---- SEND & WAIT FOR ACK=OK ----
@@ -77,15 +93,14 @@ def send_tcp():
         msg_str = f"{HEADER}{text}{FOOTER}"
         packet = FIRST_TAG + msg_str.encode() + END_TAG
 
-        print(f"\n[TCP] Sending line {index+1}: {text}")
-        print(f"[TCP] Packet: {packet}")
-
+        log(f"\n[TCP] Sending line {index+1}: {text}")
+        log(f"[TCP] Packet: {packet}")
         # Send only once
         try:
             sock.sendall(packet)
-            print("[TCP] Packet sent. Waiting for ACK='OK'...")
+            log("[TCP] Packet sent. Waiting for ACK='OK'...")
         except Exception as e:
-            print(f"[TCP] Send error: {e}")
+            log(f"[TCP] Send error: {e}")
             sock.close()
             return False
 
@@ -98,33 +113,33 @@ def send_tcp():
             try:
                 incoming = sock.recv(1024)
             except socket.timeout:
-                print("[TCP] Waiting for ACK...")
+                log("[TCP] Waiting for ACK...")
                 continue
             except Exception as e:
-                print(f"[TCP] Error while waiting for ACK: {e}")
+                log(f"[TCP] Error while waiting for ACK: {e}")
                 break
 
             if not incoming:
-                print("[TCP] Connection closed by server.")
+                log("[TCP] Connection closed by server.")
                 break
 
             incoming_str = incoming.decode(errors="ignore").strip()
 
             # ---- ACCEPT ACK ONLY IF EXACTLY "OK" ----
             if incoming_str == "OK":
-                print("[TCP] ACK RECEIVED ✔ (OK)")
+                log("[TCP] ACK RECEIVED (OK)")
                 ack_received = True
                 break
             else:
-                print(f"[TCP] Ignored non-ACK message: {incoming_str}")
+                log(f"[TCP] Ignored non-ACK message: {incoming_str}")
 
         if not ack_received:
-            print("[TCP] ERROR: No valid ACK='OK' received in 5 minutes. Stopping.")
+            log("[TCP] ERROR: No valid ACK='OK' received in 5 minutes. Stopping.")
             sock.close()
             return False
 
     sock.close()
-    print("\n[TCP] All lines sent successfully. Connection closed.")
+    log("\n[TCP] All lines sent successfully. Connection closed.")
     return True
 
 
@@ -132,16 +147,16 @@ def send_tcp():
 def main():
     if check_usb():
         if copy_usb_to_local():
-            print("[SYSTEM] CSV copied successfully. Sending to TCP server...")
+            log("[SYSTEM] CSV copied successfully. Sending to TCP server...")
             #send_tcp()
         else:
-            print("[SYSTEM] CSV not found on USB.")
+            log("[SYSTEM] CSV not found on USB.")
     else:
-        print("[SYSTEM] USB not detected. Checking for local CSV...")
+        log("[SYSTEM] USB not detected. Checking for local CSV...")
         if os.path.exists(DEST_PATH):
             send_tcp()
         else:
-            print("[SYSTEM] No local CSV file available to send.")
+            log("[SYSTEM] No local CSV file available to send.")
 
 
 # ======== ENTRY POINT ========
